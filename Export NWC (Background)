@@ -25,100 +25,68 @@ import xml.etree.ElementTree as ET
 from Autodesk.Revit.DB import FilteredElementCollector, View3D, NavisworksExportOptions, OpenOptions, ModelPathUtils
 from pyrevit import forms, script
 
-# Adding necessary Revit API and RevitServices references
+# Add Reference to RevitAPI
 clr.AddReference("RevitAPI")
 clr.AddReference("RevitServices")
-
-# Importing required modules and classes from Autodesk and RevitServices
 import Autodesk
 from RevitServices.Persistence import DocumentManager
 from RevitServices.Transactions import TransactionManager
 
+
 def open_document(file_path):
-    # Access the current Revit UIApplication instance
-    uiapp = DocumentManager.Instance.CurrentUIApplication
-
-    # Retrieve the Application object from UIApplication
-    app = uiapp.Application
-
-    # Initialize open options for the document
+    app = __revit__.Application  # Get the Revit application from the current script context
     open_options = OpenOptions()
-
-    # Set option to detach the document from central and preserve worksets
     open_options.DetachFromCentralOption = Autodesk.Revit.DB.DetachFromCentralOption.DetachAndPreserveWorksets
 
-    # Convert the user's file path to a ModelPath recognized by Revit
     model_path = ModelPathUtils.ConvertUserVisiblePathToModelPath(file_path)
-
-    # Open and return the document using the specified path and open options
     return app.OpenDocumentFile(model_path, open_options)
 
+
 def get_3d_views(doc):
-    # Retrieve all non-template 3D views from the provided document
     return [view for view in FilteredElementCollector(doc).OfClass(View3D) if not view.IsTemplate]
 
-def load_navisworks_export_options(xml_file):
-    # Initialize Navisworks export options
-    options = NavisworksExportOptions()
 
-    # Load export settings from the provided XML file, if it exists
+def load_navisworks_export_options(xml_file):
+    options = NavisworksExportOptions()
     if xml_file and System.IO.File.Exists(xml_file):
         tree = ET.parse(xml_file)
         root = tree.getroot()
     else:
         print("Invalid XML file or file does not exist.")
-
-    # Return the initialized (and potentially configured) options
     return options
+
 
 def export_view_to_nwc(doc, view, folder_path, export_options, file_name):
     try:
-        # Combine the folder path and file name to create the full export path
         nwc_file_path = System.IO.Path.Combine(folder_path, file_name)
-
-        # Export the specified view to a Navisworks Cache file
         doc.Export(folder_path, file_name, export_options)
         print("Export completed successfully to: " + nwc_file_path)
     except Exception as e:
         print("Error during export: " + str(e))
-# Main script execution starts here
+
+
+# Main script execution
 file_path_to_export = forms.pick_file(file_ext='rvt', title='Select a Revit file to export from')
 
 if file_path_to_export:
-    # Open the selected Revit file in the background
     background_doc = open_document(file_path_to_export)
 
-    # Retrieve all 3D views from the document
     views = get_3d_views(background_doc)
-
-    # Allow the user to select a 3D view for export
     selected_view = forms.SelectFromList.show([v.Name for v in views], title="Select a 3D View for NWC Export",
                                               multiselect=False)
 
     if selected_view:
-        # Find the actual view object that matches the selected view name
         selected_view_obj = next((v for v in views if v.Name == selected_view), None)
-
-        # Prompt user to select a folder for export and an XML file for export settings
         folder_path = forms.pick_folder()
         xml_file = forms.pick_file(file_ext='xml', title='Select Navisworks Export Settings File')
-
-        # Load Navisworks export options from the selected XML file
         navisworks_options = load_navisworks_export_options(xml_file)
-
-        # Ask the user for a file name for the exported NWC file
         nwc_file_name = forms.ask_for_string(default="Model", prompt="Enter the name of the NWC file:",
                                              title="NWC File Name")
 
         if nwc_file_name:
-            # Append ".nwc" extension to the file name
-            nwc_file_name += ".nwc"
-
-            # Perform the export operation
+            nwc_file_name += ".nwc"  # Ensure the file has the correct extension
             export_view_to_nwc(background_doc, selected_view_obj, folder_path, navisworks_options, nwc_file_name)
-
-            # Close the background document
-            background_doc.Close(False)
+        background_doc.Close(False)  # Close the background document
     else:
         print("No 3D view was selected for export.")
         background_doc.Close(False)  # Close the background document
