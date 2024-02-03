@@ -4,6 +4,7 @@ Welcome to [REVIT-API-TOOLS], a collection of tools designed for Revit, leveragi
 
 Features
 Tool 1: 001 - EXPORT TO NWC (BACKGROUND)
+Tool 2: 002 - CREATE WALL FINISH
 
 Contact
 Your Name - jaimeandradematamoro@gmail.com
