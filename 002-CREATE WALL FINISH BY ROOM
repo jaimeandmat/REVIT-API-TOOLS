@@ -1,0 +1,156 @@
+# -*- coding: utf-8 -*-
+__title__ = "Create Walls Finish"
+__doc__ = """Version = 1.0
+Date    = 01.02.2024
+_____________________________________________________________________
+Description:
+This button allows the user to create architectural walls finish from selected rooms, with
+enhanced error handling and additional settings for wall creation.
+- It allows the user to select a set of rooms.
+- It allows the user to select an architectural wall type.
+- It allows the user to select a level to place the walls.
+- It provides user interfaces to input wall height.
+- It provides user interfaces to input wall offset from architectural floor for skirting/shadowGap.
+- It shows a user interface if any error happened.
+
+Improvement next versions: 
+- Provide a user interface where you select a 3D view where all the new walls are highlighted and the rest is in halftone.
+- Define properties for the new elements such as workset etc.
+
+Notes:
+Nothing else to be considered yet.
+Author: J.A.M. """
+
+import clr
+clr.AddReference('System')
+from System.Collections.Generic import List
+clr.AddReference('RevitAPI')
+from Autodesk.Revit.DB import *
+from Autodesk.Revit.UI.Selection import ObjectType, Selection
+from System import Double
+from pyrevit import forms
+
+# Ensure an active document is available
+doc = __revit__.ActiveUIDocument.Document
+uidoc = __revit__.ActiveUIDocument
+selection = uidoc.Selection
+
+# Function to select rooms
+def select_rooms():
+    ref_picked_object = selection.PickObjects(ObjectType.Element)
+    picked_objects = [doc.GetElement(ref) for ref in ref_picked_object]
+    rooms = [r for r in picked_objects if r.Category.Id == ElementId(BuiltInCategory.OST_Rooms)]
+    return rooms
+
+# Function to select wall type
+def select_wall_type():
+    wall_types = FilteredElementCollector(doc).OfClass(WallType).ToElements()
+    wall_type_dict = {wt.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsValueString(): wt for wt in wall_types}
+    selected_name = forms.SelectFromList.show(list(wall_type_dict.keys()), title='Select Wall Type')
+    return wall_type_dict.get(selected_name, None)
+
+# Function to select level
+def select_level():
+    levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
+    level_dict = {l.get_Parameter(BuiltInParameter.DATUM_TEXT).AsString(): l for l in levels}
+    selected_name = forms.SelectFromList.show(list(level_dict.keys()), title='Select Level')
+    return level_dict.get(selected_name, None)
+
+# Function to get wall height from user
+def get_wall_height():
+    return forms.ask_for_string(default="3000", prompt="Enter wall height (mm):", title="Wall Height")
+
+# Function to get wall offset from user
+def get_wall_offset():
+    return forms.ask_for_string(default="0", prompt="Enter wall offset from floor (mm):", title="Wall Offset from floor")
+
+# Function to get boundary offset from user
+def get_boundary_offset():
+    return forms.ask_for_string(default="100", prompt="Enter boundary offset from room (mm):", title="Boundary Offset")
+
+# Convert unit from cm to RVT API internal units (feet)
+def convert_mm_to_internal(length):
+    """
+    Uso: Funtion to convert from mm to internal units in rvt.
+    """
+    rvt_year = int(__revit__.Application.VersionNumber)
+
+    # RVT >= 2022
+    if rvt_year < 2022:
+        from Autodesk.Revit.DB import DisplayUnitType
+        return UnitUtils.Convert(length, DisplayUnitType.DUT_CENTIMETERS, DisplayUnitType.DUT_DECIMAL_FEET)
+
+    # RVT
+    else:
+        from Autodesk.Revit.DB import UnitTypeId
+        return UnitUtils.ConvertToInternalUnits(length, UnitTypeId.Millimeters)
+
+# Function to create wall
+def create_wall(room, wall_type, level, height, offset, boundary_offset):
+    transaction = Transaction(doc)
+    transaction.Start("Create Wall")
+
+    try:
+        options = SpatialElementBoundaryOptions()
+        boundary_segments_list = room.GetBoundarySegments(options)
+        if not boundary_segments_list or len(boundary_segments_list) == 0:
+            raise InvalidOperationException("No boundary segments found for room: " + room.Name)
+
+        boundary_segments = boundary_segments_list[0]
+
+        height_ft = convert_mm_to_internal(height)  # Convert height from cm to feet
+        offset_ft = convert_mm_to_internal(offset)  # Convert offset from cm to feet
+        boundary_offset_ft = convert_mm_to_internal(boundary_offset)  # Convert boundary offset from cm to feet
+
+        for boundary_segment in boundary_segments:
+            curve = boundary_segment.GetCurve()
+            # Create an offset curve
+            offset_curve = curve.CreateOffset(boundary_offset_ft, XYZ(0, 0, -1))
+
+            # Create wall with exterior finish face alignment
+            wall = Wall.Create(doc, offset_curve, wall_type.Id, level.Id, height_ft, offset_ft, False, False)
+            if wall is None:
+                raise InvalidOperationException("Failed to create wall for room: " + room.Name)
+
+            # Set location line to Exterior
+            param = wall.get_Parameter(BuiltInParameter.WALL_KEY_REF_PARAM)
+            param.Set(int(WallLocationLine.FinishFaceInterior))
+
+    except Exception as create_wall_error:
+        transaction.RollBack()
+        raise create_wall_error
+
+    transaction.Commit()
+
+
+# Main execution
+try:
+    selected_rooms = select_rooms()
+    if not selected_rooms:
+        raise Exception("No rooms selected.")
+
+    wall_type = select_wall_type()
+    if wall_type is None:
+        raise Exception("No wall type selected.")
+
+    level = select_level()
+    if level is None:
+        raise Exception("No level selected.")
+
+    wall_height = get_wall_height()
+    if wall_height is None:
+        raise Exception("No wall height provided.")
+
+    wall_offset = get_wall_offset()
+    if wall_offset is None:
+        raise Exception("No wall offset provided.")
+
+    boundary_offset = get_boundary_offset()
+    if boundary_offset is None:
+        raise Exception("No boundary offset provided.")
+
+    for room in selected_rooms:
+        create_wall(room, wall_type, level, float(wall_height), float(wall_offset), float(boundary_offset))
+
+except Exception as e:
+    forms.alert('Error: ' + str(e), exitscript=True)
